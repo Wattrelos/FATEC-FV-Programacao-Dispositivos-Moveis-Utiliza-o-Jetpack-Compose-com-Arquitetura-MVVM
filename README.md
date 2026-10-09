@@ -1,79 +1,260 @@
-# Utilização do Jetpack Compose Com Arquitetura MVVM
+# Utilização do Jetpack Compose com Arquitetura MVVM e SQLite
 
-O MVVM é uma forma de organizar melhor o projeto, separando o código por responsabilidades.
-Em vez de deixar tudo dentro da MainActivity, o projeto é dividido em partes: uma parte cuida dos dados, outra cuida da regra da tela e outra cuida da interface visual.
-No nosso caso, isso ajuda a deixar o app mais organizado, porque a tela não acessa diretamente o banco SQLite. A tela conversa com o ViewModel, o ViewModel conversa com o Repository, e o Repository acessa o banco de dados.
-Assim, o código fica mais fácil de entender, manter e evoluir.
+> **Projeto Android Nativo** desenvolvido em Kotlin demonstrando boas práticas de engenharia de software com **Jetpack Compose**, separação de responsabilidades com padrão **MVVM (Model-View-ViewModel)**, padrão **Repository** e persistência local via **SQLite (`SQLiteOpenHelper`)**.
 
-# O que é Jetpack Compose?
+---
 
-Jetpack Compose é uma forma moderna de criar telas em aplicativos Android usando código Kotlin.
-Em vez de montar a interface usando arquivos XML, os componentes da tela são escritos diretamente no código, com funções chamadas @Composable.
-Por exemplo, um botão, um campo de texto ou uma lista são criados usando código Kotlin.
-Isso deixa a criação da interface mais direta, porque a tela e o comportamento dos componentes ficam mais próximos dentro do projeto.
-Neste app, tanto a versão sem padrão de projeto quanto a versão com MVVM utilizam Jetpack Compose para criar as telas.
+## 📑 Sumário
 
-Com o projeto criado, abra o arquivo build.gradle.kts do módulo app para adicionar as novas dependências.
+- [Visão Geral](#-visão-geral)
+- [Arquitetura e Fluxo de Dados](#-arquitetura-e-fluxo-de-dados)
+- [O que é Jetpack Compose?](#-o-que-é-jetpack-compose)
+- [Configuração do Ambiente e Dependências](#-configuração-do-ambiente-e-dependências)
+  - [Version Catalog (libs.versions.toml)](#version-catalog-gradlelibsversionstoml)
+  - [Módulo app (build.gradle.kts)](#módulo-app-appbuildgradlekts)
+  - [Entendendo as Dependências e Plugins](#entendendo-as-dependências-e-plugins)
+- [Estrutura do Projeto](#-estrutura-do-projeto)
+  - [Papel de Cada Componente](#papel-de-cada-componente)
+- [Funcionalidades do Aplicativo](#-funcionalidades-do-aplicativo)
+- [Como Executar o Projeto](#-como-executar-o-projeto)
 
-Atenção: verifique a nomenclatura e certifique-se de editar apenas o build.gradle do Module: app neste exercício, para não modificar o arquivo do projeto por engano.
+---
 
-Aqui ativaremos o bloco buildFeatures para habilitar o uso do Jetpack Compose no projeto.
+## 🎯 Visão Geral
 
-Em seguida, adicionaremos as dependências necessárias para criar interfaces com Compose, utilizar componentes do Material 3, visualizar telas no Android Studio e integrar a tela com ViewModel.
+O objetivo principal deste projeto é ilustrar de maneira clara e didática a separação de responsabilidades em um aplicativo Android moderno. Em vez de centralizar regras de negócio, chamadas ao banco e interface gráfica na `MainActivity`, o projeto divide as responsabilidades em camadas bem delimitadas:
 
-# O QUE É ISSO EXATAMENTE?
+- **Interface Visual (UI / View):** Desenvolvida declarativamente com **Jetpack Compose** e **Material 3**. Observa estados emitidos pelo ViewModel e reage a eventos do usuário.
+- **Camada de Apresentação e Estado (ViewModel):** Retém os estados da UI (`products`, `searchQuery`, `editingProduct`, `currentScreen`), sobrevive a recomposições e coordena as intenções de usuário.
+- **Camada de Repositório (Repository):** Abstrai as operações de dados. O ViewModel interage exclusivamente com o repositório, desacoplando a lógica de tela dos detalhes de implementação do SQLite.
+- **Camada de Dados Local (Data Source / SQLite):** Gerenciada por `ProductDbHelper` que estende `SQLiteOpenHelper`, executando queries SQL nativas (CRUD).
 
-O plugin com.android.application indica que este módulo será um aplicativo Android. Já o plugin kotlin-android permite utilizar Kotlin no projeto, enquanto o plugin compose.compiler habilita a compilação correta das telas criadas com Jetpack Compose.
+---
 
-O bloco buildFeatures { compose = true } ativa o Jetpack Compose no módulo app. Com isso, o projeto passa a permitir a criação de interfaces diretamente em Kotlin, sem depender obrigatoriamente de arquivos XML.
+## 🏛️ Arquitetura e Fluxo de Dados
 
-O bloco kotlin { compilerOptions { ... } } define a versão da JVM usada pelo Kotlin. Neste caso, o projeto está configurado para gerar código compatível com Java 8, usando JvmTarget.JVM_1_8.
+Abaixo está o fluxo unidirecional de dados (Unidirectional Data Flow - UDF) implementado:
 
-Para organizar as versões das bibliotecas do Compose, utilizamos o Compose BOM. Ele centraliza o controle das versões e evita conflitos entre dependências como ui, material3 e ferramentas de preview.
+```mermaid
+flowchart LR
+    subgraph UI ["Camada UI (Compose)"]
+        V[MainActivity & Telas Compose\nProductListScreen / ProductFormScreen]
+    end
 
-A dependência activity-compose permite usar o Compose dentro da MainActivity, possibilitando carregar a interface com setContent { }.
+    subgraph VM ["Camada de Apresentação"]
+        VMClass[ProductViewModel]
+        VMFact[ProductViewModelFactory]
+    end
 
-As dependências ui e ui-tooling-preview fornecem a base para construir telas com Compose e visualizar os componentes no Android Studio usando @Preview.
+    subgraph Data ["Camada de Dados"]
+        Repo[ProductRepository]
+        DB[ProductDbHelper\nSQLiteOpenHelper]
+        SQLite[(Banco SQLite\nproducts.db)]
+    end
 
-A dependência material3 adiciona os componentes visuais do Material Design 3, como botões, campos de texto, cards, barras superiores e outros elementos modernos de interface.
+    V -- Eventos / Ações do Usuário --> VMClass
+    VMClass -- Expõe Estados Observáveis --> V
+    VMClass -- Solicita Operações CRUD --> Repo
+    Repo -- Encaminha Consultas / Gravações --> DB
+    DB -- Executa SQL --> SQLite
+    SQLite -- Retorna Dados / Cursor --> DB
+    DB -- Converte Cursor em List<Product> --> Repo
+    Repo -- Entrega Modelos de Domínio --> VMClass
+```
 
-A dependência lifecycle-viewmodel-compose permite integrar ViewModel com Compose, ajudando a separar a lógica da aplicação da interface visual.
+### Principais Benefícios:
+1. **Desacoplamento:** A tela não sabe que existe um banco SQLite rodando por baixo. Caso queira migrar futuramente para Room Database ou uma API REST, basta ajustar o repositório sem quebrar a interface gráfica.
+2. **Testabilidade:** Repositórios e ViewModels podem ser testados de forma independente de componentes de interface ou ciclo de vida de Activities.
+3. **Manutenibilidade:** Código legível, com responsabilidades claras para cada arquivo.
 
-A dependência ui-tooling, usada como debugImplementation, adiciona ferramentas de apoio para inspeção e pré-visualização das telas durante o desenvolvimento.
+---
 
-As dependências core-ktx, appcompat, material, activity e constraintlayout fornecem recursos adicionais do Android, compatibilidade com versões anteriores e suporte a componentes tradicionais usados em projetos Android.
+## 🎨 O que é Jetpack Compose?
 
-Por fim, as dependências junit, androidx-junit e espresso-core são usadas para testes unitários e testes instrumentados no Android.
+O **Jetpack Compose** é o kit de ferramentas moderno e declarativo do Android para criação de interfaces de usuário em Kotlin puro:
 
+- **Substituição do XML:** Em vez de arquivos de layout XML (`activity_main.xml`), estilos e seletores, toda a interface é definida no código Kotlin usando funções anotadas com `@Composable`.
+- **Paradigma Declarativo:** Descreve-se a UI em termos de seu estado atual. Quando o estado muda (por exemplo, ao digitar no campo de busca ou excluir um produto), o Compose automaticamente recalcula e redesenha apenas os componentes que dependem desse estado (*recomposição*).
+- **Material Design 3:** Integração nativa com os componentes modernos de design (`Scaffold`, `TopAppBar`, `Card`, `OutlinedTextField`, `Button`).
 
-## Organização de pastas
+---
 
-Nosso projeto irá ser estruturado dessa forma possuindo as pastas e, dentro de cada pasta especifica você irá criar os seguintes arquivos:
-.
-├── app/
-│   ├── .gitignore
-│   ├── build.gradle.kts
-│   └── src/
-│       ├── main/
-│       │   ├── AndroidManifest.xml
-│       │   ├── java/
-│       │   │   └── com/
-│       │   │       └── example/
-│       │   │           └── produtossqlite/
-│       │   │               ├── MainActivity.kt                # É a tela principal do aplicativo. Ela inicializa o ProductDbHelper, cria o ProductRepository, configura o ProductViewModel e ativa o Jetpack Compose com setContent. A MainActivity também chama a função principal do app, que decide se será exibida a tela de listagem ou a tela de cadastro.
-│       │   │               ├── data/                          #
-│       │   │               │   ├── local/                     # Cuida diretamente do banco SQLite.
-│       │   │               │   │   └── ProductDbHelper.kt     # É a classe responsável por criar, acessar e gerenciar o banco de dados SQLite. Ela herda de SQLiteOpenHelper, criando a tabela de produtos e disponibilizando métodos para inserir, listar, atualizar e excluir registros.
-│       │   │               │   └── repository/                #Faz a ponte entre o banco e o ViewModel.
-│       │   │               │       └── ProductRepository.kt   # É a classe que faz a ponte entre o banco de dados e o restante do aplicativo. Ela chama os métodos do ProductDbHelper, mas evita que o ViewModel precise acessar o SQLite diretamente.
-│       │   │               ├── model/                         # Representa os dados do sistema.
-│       │   │               │   └── Product.kt                 # É a data class que representa um produto no sistema. Ela guarda os dados principais que serão salvos no SQLite: id, name, price e quantity.
-│       │   │               ├── ui/                            #
-│       │   │               │   ├── components/                # Contém partes visuais reutilizáveis.
-│       │   │               │   │   └── ProductItem.kt         # É o componente visual que representa cada produto dentro da lista. Ele mostra o nome, o preço, a quantidade e os botões de editar e excluir.
-│       │   │               │   └── screens/                   # Contém as telas principais do app.
-│       │   │               │       ├── ProductFormScreen.kt   # É a tela usada para cadastrar um novo produto ou editar um produto já existente. Ela possui os campos de nome, preço e quantidade, além dos botões de salvar e cancelar.
-│       │   │               │       └── ProductListScreen.kt   # É a tela responsável por exibir a lista de produtos cadastrados. Nela aparecem o botão de adicionar produto, o campo de pesquisa e os produtos cadastrados com as opções de editar e excluir.
-│       │   │               └── viewmodel/                     # Controla os dados, estados e ações da tela.
-│       │   │                   ├── ProductViewModel.kt        # É a classe responsável por controlar os dados e as ações da tela. Ela guarda a lista de produtos, o texto da busca, o produto que está sendo editado e qual tela está sendo exibida. Também possui os métodos para adicionar, editar, excluir, pesquisar e atualizar a lista de produtos.
-│       │   │                   └── ProductViewModelFactory.kt # É a classe usada para criar o ProductViewModel passando o ProductRepository como parâmetro. Ela é necessária porque o ViewModel precisa receber o repositório para conseguir acessar os dados do 
+## ⚙️ Configuração do Ambiente e Dependências
+
+O projeto utiliza o **Gradle Version Catalogs** (`libs.versions.toml`) e scripts de build em Kotlin DSL (`build.gradle.kts`).
+
+### Version Catalog (`gradle/libs.versions.toml`)
+
+Contém as versões e aliases das bibliotecas utilizadas:
+
+```toml
+[versions]
+agp = "9.1.0"
+coreKtx = "1.15.0"
+appcompat = "1.7.0"
+material = "1.12.0"
+activityCompose = "1.9.3"
+composeBom = "2024.10.01"
+lifecycleViewmodelCompose = "2.8.7"
+kotlin = "2.1.10"
+
+[libraries]
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+material = { group = "com.google.android.material", name = "material", version.ref = "material" }
+androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
+androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
+androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
+androidx-compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
+androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
+androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+androidx-lifecycle-viewmodel-compose = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "lifecycleViewmodelCompose" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+```
+
+### Módulo app (`app/build.gradle.kts`)
+
+> [!IMPORTANT]
+> Certifique-se de editar o arquivo `build.gradle.kts` correspondente ao **Module :app** e habilitar `buildFeatures { compose = true }`.
+
+```kotlin
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.compose)
+}
+
+android {
+    namespace = "com.example.produtossqlite"
+    compileSdk = 35
+
+    defaultConfig {
+        applicationId = "com.example.produtossqlite"
+        minSdk = 24
+        targetSdk = 35
+        versionCode = 1
+        versionName = "1.0"
+
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    buildFeatures {
+        compose = true
+    }
+}
+
+dependencies {
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.appcompat)
+    implementation(libs.material)
+    implementation(libs.androidx.activity.compose)
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.ui.graphics)
+    implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.lifecycle-viewmodel-compose)
+}
+```
+
+### Entendendo as Dependências e Plugins
+
+| Dependência / Plugin | Função / Propósito |
+| :--- | :--- |
+| `com.android.application` | Plugin oficial que configura o módulo para compilar um APK/Bundle Android. |
+| `org.jetbrains.kotlin.plugin.compose` | Plugin do compilador Kotlin que viabiliza transformações necessárias para o Jetpack Compose. |
+| `buildFeatures { compose = true }` | Ativa o suporte a Compose dentro do Android Gradle Plugin (AGP). |
+| `compose-bom` (Bill of Materials) | Centraliza o alinhamento de versões das bibliotecas do Jetpack Compose, evitando conflitos de compatibilidade. |
+| `activity-compose` | Permite ligar o Compose ao ciclo de vida da Activity através do método `setContent { }`. |
+| `material3` | Conjunto completo de componentes visuais seguindo o padrão Google Material Design 3. |
+| `lifecycle-viewmodel-compose` | Disponibiliza a função `viewModel()`, permitindo instanciar e recuperar ViewModels diretamente em Composable functions. |
+| `ui-tooling-preview` | Suporte para renderização em tempo real de telas anotadas com `@Preview` no Android Studio. |
+
+---
+
+## 📂 Estrutura do Projeto
+
+Abaixo está o mapa de diretórios e arquivos com as responsabilidades detalhadas:
+
+```text
+app/
+├── build.gradle.kts
+└── src/
+    └── main/
+        ├── AndroidManifest.xml
+        └── java/com/example/produtossqlite/
+            ├── MainActivity.kt
+            ├── model/
+            │   └── Product.kt
+            ├── data/
+            │   ├── local/
+            │   │   └── ProductDbHelper.kt
+            │   └── repository/
+            │       └── ProductRepository.kt
+            ├── viewmodel/
+            │   ├── ProductViewModel.kt
+            │   └── ProductViewModelFactory.kt
+            └── ui/
+                ├── components/
+                │   └── ProductItem.kt
+                └── screens/
+                    ├── ProductListScreen.kt
+                    └── ProductFormScreen.kt
+```
+
+### Papel de Cada Componente
+
+#### 1. Camada de Modelo (`model`)
+- **[Product.kt](/app/src/main/java/com/example/produtossqlite/model/Product.kt):**  
+  `data class Product(id, name, price, quantity)`. Representa o modelo de domínio do produto manipulado na interface e persistido no SQLite.
+
+#### 2. Camada de Dados (`data`)
+- **[ProductDbHelper.kt](/app/src/main/java/com/example/produtossqlite/data/local/ProductDbHelper.kt):**  
+  Subclasse de `SQLiteOpenHelper`. Gerencia a criação da tabela `products` no banco `products.db` e implementa as rotinas de `insertProduct()`, `getAllProducts()`, `updateProduct()` e `deleteProduct()`.
+- **[ProductRepository.kt](/app/src/main/java/com/example/produtossqlite/data/repository/ProductRepository.kt):**  
+  Padrão Repository. Intermedeia as chamadas entre o ViewModel e o `ProductDbHelper`, isolando a fonte de dados do restante da aplicação.
+
+#### 3. Camada de Apresentação (`viewmodel`)
+- **[ProductViewModel.kt](/app/src/main/java/com/example/produtossqlite/viewmodel/ProductViewModel.kt):**  
+  Responsável por expor estados como `products`, `searchQuery`, `editingProduct` e `currentScreen` usando `mutableStateOf`. Fornece ações para pesquisa em tempo real (`filteredProducts`), abertura de formulários, salvamento e remoção de itens.
+- **[ProductViewModelFactory.kt](/app/src/main/java/com/example/produtossqlite/viewmodel/ProductViewModelFactory.kt):**  
+  Implementação de `ViewModelProvider.Factory`. Permite instanciar o `ProductViewModel` injetando uma instância de `ProductRepository`.
+
+#### 4. Interface com o Usuário (`ui`)
+- **[MainActivity.kt](/app/src/main/java/com/example/produtossqlite/MainActivity.kt):**  
+  Ponto de entrada do app. Inicializa o banco de dados, repositório e factory, configurando o `setContent { }` com `ProductApp` para alternar entre listagem e formulário.
+- **[ProductListScreen.kt](/app/src/main/java/com/example/produtossqlite/ui/screens/ProductListScreen.kt):**  
+  Tela principal de listagem. Exibe campo de busca dinâmico, botão para adicionar novo produto e lista de itens em `LazyColumn`.
+- **[ProductFormScreen.kt](/app/src/main/java/com/example/produtossqlite/ui/screens/ProductFormScreen.kt):**  
+  Tela de cadastro/edição. Contém campos de texto (`OutlinedTextField`), validações numéricas e diálogo de alerta (`AlertDialog`) para entradas inválidas.
+- **[ProductItem.kt](/app/src/main/java/com/example/produtossqlite/ui/components/ProductItem.kt):**  
+  Componente `Card` reutilizável que exibe nome, preço formatado em moeda brasileira (BRL / `R$`) e quantidade, além dos botões de ação (Editar e Excluir).
+
+---
+
+## 📱 Funcionalidades do Aplicativo
+
+- [x] **Cadastro de Produtos:** Registro de nome, valor monetário e quantidade em estoque com validação.
+- [x] **Listagem com Rolagem Otimizada:** Exibição eficiente de itens via `LazyColumn`.
+- [x] **Pesquisa em Tempo Real:** Filtragem instantânea da lista conforme o usuário digita no campo de busca.
+- [x] **Edição de Registros:** Pré-preenchimento dos dados existentes no formulário e atualização no banco.
+- [x] **Exclusão de Produtos:** Remoção direta com atualização imediata da listagem.
+- [x] **Formatação de Moeda:** Exibição amigável dos preços em Real (`R$`) com `NumberFormat`.
+- [x] **Tratamento de Entradas:** Alertas amigáveis quando campos obrigatórios ou formatos numéricos estiverem incorretos.
+
+---
+
+## 🚀 Como Executar o Projeto
+
+1. Abra o **Android Studio** (versão Ladybug / Hedgehog ou superior recomendada).
+2. Selecione a opção **Open** e aponte para a pasta raiz do projeto (`produtos-sql-lite`).
+3. Aguarde o término da sincronização do Gradle (**Gradle Sync**).
+4. Conecte um dispositivo físico com depuração USB ativada ou inicie um Emulador Android (AVD) com Android 7.0 (API 24) ou superior.
+5. Clique em **Run 'app'** (`Shift + F10`) no Android Studio para compilar e instalar o app.
